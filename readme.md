@@ -1,6 +1,123 @@
 # SubnauticaMods
 My mods for Subnautica and Subnautica: Below Zero
 
+---
+
+## Building / Development Setup
+
+### Software requirements
+
+| Tool | Notes |
+|------|-------|
+| **Visual Studio 2019 or 2022** | Community edition is free. JetBrains Rider or VS Code with the C# extension also work. |
+| **.NET Framework 4.7.2 Developer Pack** | The targeting pack is required because the projects target `net472`. Download from [Microsoft](https://dotnet.microsoft.com/en-us/download/dotnet-framework/net472). |
+| **Subnautica** and/or **Subnautica: Below Zero** | Installed via Steam or Epic Games Store. |
+| **QModManager** | Must be installed inside the game. Follow instructions on [Nexus Mods](https://www.nexusmods.com/subnautica/mods/201). |
+| **SMLHelper** | Must be installed inside the game. Follow instructions on [Nexus Mods](https://www.nexusmods.com/subnautica/mods/113). |
+| **AssemblyPublicizer** | Required to make all game-assembly members accessible to mod code. A pre-built binary is available at [CabbageCrow/AssemblyPublicizer](https://github.com/CabbageCrow/AssemblyPublicizer). The `update_game_sources.bat` script expects it at `c:\programming\assembly_publicizer\AssemblyPublicizer.exe`. |
+
+### Repository layout
+
+```
+SubnauticaMods/
+├── .dependencies/          # Non-gitignored third-party DLLs (Harmony, SMLHelper, Unity, …)
+│   ├── gameSN/             # Subnautica stable references
+│   ├── gameSNexp/          # Subnautica experimental references
+│   ├── gameBZ/             # Below Zero stable references
+│   └── gameBZexp/          # Below Zero experimental references
+├── Common/                 # Shared source code (Shared Project, included by every mod)
+├── Common.Tests/           # NUnit tests for the Common library
+├── <ModName>/              # One folder per mod, each with its own .csproj
+├── project.props           # Shared MSBuild properties (target framework, output paths, …)
+├── post-build.props        # Triggers post-build.bat after every build
+├── post-build.bat          # Copies build output to the game's QMods folder
+├── update_game_sources.bat # Extracts and publicizes game DLLs (run once per game update)
+└── SubnauticaMods.sln      # Visual Studio solution
+```
+
+### Build configurations
+
+Every project exposes the following MSBuild configurations (selected in Visual Studio's toolbar or via `--configuration`):
+
+| Configuration | Game | Branch | Notes |
+|--------------|------|--------|-------|
+| `SN.dev` | Subnautica | stable | Enables `DEBUG`, `LOAD_CONFIG`. **Default** when none is specified. |
+| `SN.publish` | Subnautica | stable | Release build; treats warnings as errors. |
+| `SN.testbuild` | Subnautica | stable | Debug build without `LOAD_CONFIG`. |
+| `SNexp.dev` | Subnautica | experimental | Same as `SN.dev` but against experimental-branch DLLs. |
+| `SNexp.testbuild` | Subnautica | experimental | – |
+| `BZ.dev` | Below Zero | stable | Enables `DEBUG`, `GAME_BZ`, `LOAD_CONFIG`. |
+| `BZ.publish` | Below Zero | stable | Release build; treats warnings as errors. |
+| `BZ.testbuild` | Below Zero | stable | Debug build without `LOAD_CONFIG`. |
+| `BZexp.dev` | Below Zero | experimental | – |
+| `BZexp.testbuild` | Below Zero | experimental | – |
+
+The preprocessor symbols injected by each configuration are:
+
+- `GAME_SN` / `GAME_BZ` – distinguishes between the two games
+- `BRANCH_STABLE` / `BRANCH_EXP` – stable vs. experimental Steam branch
+- `DEBUG` / `TRACE` – standard debug symbols
+- `LOAD_CONFIG` – forces the mod to load its JSON config file even in debug builds
+
+### Step-by-step setup
+
+1. **Clone the repository**
+
+   ```bash
+   git clone https://github.com/zorgesho/SubnauticaMods.git
+   cd SubnauticaMods
+   ```
+
+2. **Install the .NET Framework 4.7.2 Developer Pack**
+   Download and run the installer from https://dotnet.microsoft.com/en-us/download/dotnet-framework/net472.
+
+3. **Install QModManager and SMLHelper in your game**
+   Follow the installation guides on Nexus Mods. This puts the required DLLs (e.g. `SMLHelper.dll`, `0Harmony.dll`) into the game's `BepInEx`/`QMods` folder; the copies already committed under `.dependencies/` are usually sufficient to compile, but keep them in sync if you update the mods.
+
+4. **Obtain and publicize the game assemblies**
+   The game's managed assemblies (`Assembly-CSharp.dll`, `Assembly-CSharp-firstpass.dll`) are **not** included in the repository (see `.gitignore`). You must generate the publicized versions yourself:
+
+   a. Locate the `Managed` folder inside your game installation:
+      - Subnautica: `<game_root>/Subnautica_Data/Managed/`
+      - Below Zero: `<game_root>/SubnauticaZero_Data/Managed/`
+
+   b. Download **AssemblyPublicizer** and place it as described above, or run it manually:
+
+      ```
+      AssemblyPublicizer.exe --input=Assembly-CSharp.dll --output=<repo>\.dependencies\gameSN\Assembly-CSharp.pb.dll
+      AssemblyPublicizer.exe --input=Assembly-CSharp-firstpass.dll --output=<repo>\.dependencies\gameSN\Assembly-CSharp-firstpass.pb.dll
+      ```
+
+      Repeat for `gameBZ` (and `gameSNexp` / `gameBZexp` if you use experimental branches).
+
+   c. Alternatively, run the helper script (Windows only, adjusts paths in the script first):
+
+      ```bat
+      update_game_sources.bat SN
+      update_game_sources.bat BZ
+      ```
+
+5. **Open the solution and build**
+   Open `SubnauticaMods.sln` in Visual Studio, select the desired configuration (e.g. `SN.dev`), and press **Build → Build Solution** (or `Ctrl+Shift+B`).
+
+   The compiled `.dll` will be placed in `<ModFolder>/bin/<Configuration>/` and, if the game's `QMods` folder exists at `c:\games\subnautica\QMods` (or the BZ equivalent), it will be copied there automatically by `post-build.bat`.
+
+6. **Run the tests (optional)**
+   The `Common.Tests` project uses NUnit. You can run tests from the **Test Explorer** in Visual Studio or from the command line:
+
+   ```bash
+   dotnet test Common.Tests/Common.Tests.csproj -c SN.dev
+   ```
+
+### Modifying an existing mod
+
+- Source files for each mod live inside their own folder (e.g. `ConsoleImproved/src/`).
+- Shared utilities are in `Common/`; changes there affect every mod.
+- Each mod has a `mod.SN.json` and/or `mod.BZ.json` manifest. The post-build script automatically renames the correct one to `mod.json` before copying it to the game.
+- The `config.cs` file in each mod defines the user-configurable options (serialized as `config.json` in the QMods folder at runtime).
+
+---
+
 ### Published on NexusMods
 Mod | Nexus description | Nexus SN | Nexus BZ
 -|-|:-:|:-:
